@@ -1,5 +1,7 @@
 # Gong MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@kenazk/gong-mcp)](https://smithery.ai/server/@kenazk/gong-mcp)
+
 A Model Context Protocol (MCP) server that provides access to Gong's API for retrieving call recordings and transcripts. This server allows Claude to interact with Gong data through a standardized interface.
 
 ## Features
@@ -16,6 +18,14 @@ A Model Context Protocol (MCP) server that provides access to Gong's API for ret
 - Gong API credentials (Access Key and Secret)
 
 ## Installation
+
+### Installing via Smithery
+
+To install Gong MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@kenazk/gong-mcp):
+
+```bash
+npx -y @smithery/cli install @kenazk/gong-mcp --client claude
+```
 
 ### Local Development
 
