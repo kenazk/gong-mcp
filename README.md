@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/kenazk-gong-mcp-badge.png)](https://mseep.ai/app/kenazk-gong-mcp)
+
 # Gong MCP Server
 
 A Model Context Protocol (MCP) server that provides access to Gong's API for retrieving call recordings and transcripts. This server allows Claude to interact with Gong data through a standardized interface.
