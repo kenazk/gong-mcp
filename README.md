@@ -47,8 +47,10 @@ docker build -t gong-mcp .
   "command": "docker",
   "args": [
     "run",
-    "-it",
+    "-i",
     "--rm",
+    "-e", "GONG_ACCESS_KEY",
+    "-e", "GONG_ACCESS_SECRET",
     "gong-mcp"
   ],
   "env": {
