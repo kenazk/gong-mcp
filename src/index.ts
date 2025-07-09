@@ -19,7 +19,7 @@ console.warn = (...args) => originalConsole.error(...args);
 
 dotenv.config();
 
-const GONG_API_URL = 'https://api.gong.io/v2';
+const GONG_API_URL = process.env.GONG_API_URL+'/v2';
 const GONG_ACCESS_KEY = process.env.GONG_ACCESS_KEY;
 const GONG_ACCESS_SECRET = process.env.GONG_ACCESS_SECRET;
 
