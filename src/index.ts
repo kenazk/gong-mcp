@@ -68,7 +68,28 @@ interface GongListCallsArgs {
 }
 
 interface GongRetrieveTranscriptsArgs {
-  callIds: string[];
+  callIds: string | string[];
+}
+
+interface GongGetCallsArgs {
+  ids: string | string[];
+}
+
+interface GongGetCallsForEmailArgs {
+  emailAddress: string;
+}
+
+interface GongDataForEmailResponse {
+  requestId: string;
+  emails: unknown[];
+  calls: Array<{
+    id: string;
+    status: string;
+    externalSystems: unknown[];
+  }>;
+  meetings: unknown[];
+  customerData: unknown[];
+  customerEngagement: unknown[];
 }
 
 // Gong API Client
@@ -133,15 +154,91 @@ class GongClient {
     return this.request<GongListCallsResponse>('GET', '/calls', params);
   }
 
-  async retrieveTranscripts(callIds: string[]): Promise<GongRetrieveTranscriptsResponse> {
+  async retrieveTranscripts(callIds: string | string[]): Promise<GongRetrieveTranscriptsResponse> {
+    const idsArray = typeof callIds === 'string' ? [callIds] : callIds;
     return this.request<GongRetrieveTranscriptsResponse>('POST', '/calls/transcript', undefined, {
       filter: {
-        callIds,
+        callIds: idsArray,
         includeEntities: true,
         includeInteractionsSummary: true,
         includeTrackers: true
       }
     });
+  }
+
+  async getCalls(ids: string | string[]): Promise<GongCall | GongCall[]> {
+    if (typeof ids === 'string') {
+      try {
+        return await this.request<GongCall>('GET', `/calls/${ids}`);
+      } catch (error: any) {
+        // Handle error gracefully for single calls too
+        const statusCode = error?.response?.status || error?.status;
+        let reason = 'Unknown error';
+        
+        if (statusCode === 404) {
+          reason = 'Call not found or not accessible (may be scheduled/incomplete)';
+        } else if (statusCode === 403) {
+          reason = 'Access denied';
+        } else if (statusCode === 400) {
+          reason = 'Invalid call ID format';
+        } else {
+          reason = error instanceof Error ? error.message : String(error);
+        }
+        
+        // Return structured error for single calls
+        return {
+          calls: [],
+          skipped: [{ id: ids, reason }],
+          summary: `Retrieved 0 calls, skipped 1 calls`
+        } as any;
+      }
+    }
+    
+    const results: GongCall[] = [];
+    const skipped: Array<{id: string, reason: string}> = [];
+    
+    // Fetch calls sequentially to avoid rate limiting issues
+    for (const id of ids) {
+      try {
+        const call = await this.request<GongCall>('GET', `/calls/${id}`);
+        results.push(call);
+      } catch (error: any) {
+        console.error(`Failed to fetch call ${id}:`, error);
+        
+        // Handle different error types gracefully
+        const statusCode = error?.response?.status || error?.status;
+        let reason = 'Unknown error';
+        
+        if (statusCode === 404) {
+          reason = 'Call not found or not accessible (may be scheduled/incomplete)';
+        } else if (statusCode === 403) {
+          reason = 'Access denied';
+        } else if (statusCode === 400) {
+          reason = 'Invalid call ID format';
+        } else {
+          reason = error instanceof Error ? error.message : String(error);
+        }
+        
+        skipped.push({ id, reason });
+      }
+    }
+    
+    // Return results with information about skipped calls
+    if (skipped.length > 0) {
+      const resultWithSkipped = {
+        calls: results,
+        skipped: skipped,
+        summary: `Retrieved ${results.length} calls, skipped ${skipped.length} calls`
+      };
+      return resultWithSkipped as any; // Cast to maintain return type compatibility
+    }
+    
+    return results;
+  }
+
+  async getCallsForEmail(emailAddress: string): Promise<GongDataForEmailResponse['calls']> {
+    const response = await this.request<GongDataForEmailResponse>('GET', '/data-privacy/data-for-email-address', { emailAddress });
+    return response.calls;
   }
 }
 
@@ -168,17 +265,66 @@ const LIST_CALLS_TOOL: Tool = {
 
 const RETRIEVE_TRANSCRIPTS_TOOL: Tool = {
   name: "retrieve_transcripts",
-  description: "Retrieve transcripts for specified call IDs. Returns detailed transcripts including speaker IDs, topics, and timestamped sentences.",
+  description: "Retrieve transcripts for one or more call IDs. Returns detailed transcripts including speaker IDs, topics, and timestamped sentences. Accepts either a single call ID or an array of call IDs.",
   inputSchema: {
     type: "object",
     properties: {
       callIds: {
-        type: "array",
-        items: { type: "string" },
-        description: "Array of Gong call IDs to retrieve transcripts for"
+        oneOf: [
+          {
+            type: "string",
+            description: "A single Gong call ID to retrieve transcript for"
+          },
+          {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of Gong call IDs to retrieve transcripts for"
+          }
+        ],
+        description: "Either a single call ID string or an array of call ID strings"
       }
     },
     required: ["callIds"]
+  }
+};
+
+const GET_CALLS_TOOL: Tool = {
+  name: "get_calls",
+  description: "Retrieve details for one or more Gong calls by ID(s). Returns call metadata including title, participants, duration, and other call details. Accepts either a single call ID or an array of call IDs.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ids: {
+        oneOf: [
+          {
+            type: "string",
+            description: "A single Gong call ID to retrieve"
+          },
+          {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of Gong call IDs to retrieve"
+          }
+        ],
+        description: "Either a single call ID string or an array of call ID strings"
+      }
+    },
+    required: ["ids"]
+  }
+};
+
+const GET_CALLS_FOR_EMAIL_TOOL: Tool = {
+  name: "get_calls_for_email",
+  description: "Retrieve all Gong calls associated with a specific email address. Returns call IDs, status, and external system information for meeting preparation.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      emailAddress: {
+        type: "string",
+        description: "The email address to retrieve associated calls for"
+      }
+    },
+    required: ["emailAddress"]
   }
 };
 
@@ -206,18 +352,69 @@ function isGongListCallsArgs(args: unknown): args is GongListCallsArgs {
 }
 
 function isGongRetrieveTranscriptsArgs(args: unknown): args is GongRetrieveTranscriptsArgs {
+  if (typeof args !== "object" || args === null || !("callIds" in args)) {
+    return false;
+  }
+  
+  let callIds = (args as any).callIds;
+  
+  // Handle case where Claude sends JSON-encoded strings
+  if (typeof callIds === "string") {
+    try {
+      const parsed = JSON.parse(callIds);
+      if (Array.isArray(parsed)) {
+        callIds = parsed;
+        (args as any).callIds = callIds; // Update the original args
+      }
+    } catch {
+      // If parsing fails, treat as regular string
+    }
+  }
+  
+  return (
+    typeof callIds === "string" ||
+    (Array.isArray(callIds) && callIds.every((id: unknown) => typeof id === "string"))
+  );
+}
+
+function isGongGetCallsArgs(args: unknown): args is GongGetCallsArgs {
+  if (typeof args !== "object" || args === null || !("ids" in args)) {
+    return false;
+  }
+  
+  let ids = (args as any).ids;
+  
+  // Handle case where Claude sends JSON-encoded strings
+  if (typeof ids === "string") {
+    try {
+      const parsed = JSON.parse(ids);
+      if (Array.isArray(parsed)) {
+        ids = parsed;
+        (args as any).ids = ids; // Update the original args
+      }
+    } catch {
+      // If parsing fails, treat as regular string
+    }
+  }
+  
+  return (
+    typeof ids === "string" ||
+    (Array.isArray(ids) && ids.every((id: unknown) => typeof id === "string"))
+  );
+}
+
+function isGongGetCallsForEmailArgs(args: unknown): args is GongGetCallsForEmailArgs {
   return (
     typeof args === "object" &&
     args !== null &&
-    "callIds" in args &&
-    Array.isArray((args as GongRetrieveTranscriptsArgs).callIds) &&
-    (args as GongRetrieveTranscriptsArgs).callIds.every(id => typeof id === "string")
+    "emailAddress" in args &&
+    typeof (args as GongGetCallsForEmailArgs).emailAddress === "string"
   );
 }
 
 // Tool handlers
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [LIST_CALLS_TOOL, RETRIEVE_TRANSCRIPTS_TOOL],
+  tools: [LIST_CALLS_TOOL, RETRIEVE_TRANSCRIPTS_TOOL, GET_CALLS_TOOL, GET_CALLS_FOR_EMAIL_TOOL],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request: { params: { name: string; arguments?: unknown } }) => {
@@ -250,6 +447,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request: { params: { name
         }
         const { callIds } = args;
         const response = await gongClient.retrieveTranscripts(callIds);
+        return {
+          content: [{ 
+            type: "text", 
+            text: JSON.stringify(response, null, 2)
+          }],
+          isError: false,
+        };
+      }
+
+      case "get_calls": {
+        if (!isGongGetCallsArgs(args)) {
+          throw new Error("Invalid arguments for get_calls");
+        }
+        const { ids } = args;
+        const response = await gongClient.getCalls(ids);
+        return {
+          content: [{ 
+            type: "text", 
+            text: JSON.stringify(response, null, 2)
+          }],
+          isError: false,
+        };
+      }
+
+      case "get_calls_for_email": {
+        if (!isGongGetCallsForEmailArgs(args)) {
+          throw new Error("Invalid arguments for get_calls_for_email");
+        }
+        const { emailAddress } = args;
+        const response = await gongClient.getCallsForEmail(emailAddress);
         return {
           content: [{ 
             type: "text", 
