@@ -29,4 +29,8 @@ coverage/
 
 # Temporary files
 tmp/
-temp/ 
+temp/
+
+# AI assistants
+CLAUDE.md
+.claude

@@ -1,0 +1,36 @@
+# Environment files (secrets should be passed at runtime)
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Dependencies (will be installed in container)
+node_modules
+
+# Build output (will be built in container)
+dist
+
+# Documentation
+README.md
+CLAUDE.md
+
+# IDE and editor files
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs
+*.log
+
+# Test and coverage
+coverage
+
+# AI assistants
+CLAUDE.md
+.claude
