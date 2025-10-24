@@ -6,13 +6,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install 2>&1
+RUN npm install
 
 # Copy source code
 COPY . .
 
 # Build TypeScript code
-RUN npm run build 2>&1
+RUN npm run build
 
 # Start the server
-CMD ["sh", "-c", "node dist/index.js 2>&1"] 
+CMD ["node", "dist/index.js"] 
