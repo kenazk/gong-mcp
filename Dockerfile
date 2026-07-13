@@ -1,4 +1,7 @@
+FROM dopplerhq/cli:3-alpine AS doppler
 FROM node:20-alpine
+
+COPY --from=doppler /bin/doppler /usr/local/bin/doppler
 
 WORKDIR /app
 
@@ -9,4 +12,4 @@ COPY . .
 RUN npm run build
 
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+CMD ["doppler", "run", "--", "node", "dist/index.js"]
