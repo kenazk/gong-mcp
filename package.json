@@ -12,7 +12,8 @@
     "@modelcontextprotocol/sdk": "^1.8.0",
     "axios": "^1.6.7",
     "dotenv": "^16.4.5",
-    "express": "^4.22.2"
+    "express": "^4.22.2",
+    "stytch": "^14.2.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",

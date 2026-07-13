@@ -12,11 +12,11 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import express from 'express';
+import { createAuthenticator } from './auth.js';
+import { registerWellKnownRoutes, resourceMetadataUrl } from './well-known.js';
 
 dotenv.config();
 
-// In stdio mode, stdout is reserved for JSON-RPC frames — redirect console output to stderr
-// so stray logs don't corrupt the protocol. In HTTP mode we want normal stdout logging.
 const isStdioMode = !process.env.PORT;
 if (isStdioMode) {
   const originalConsole = { ...console };
@@ -34,40 +34,20 @@ if (!GONG_ACCESS_KEY || !GONG_ACCESS_SECRET || !process.env.GONG_API_URL) {
   process.exit(1);
 }
 
-// MCP_AUTH_TOKENS is a JSON map from bearer token → user label, e.g. {"tok_abc123":"alice"}.
-// Rotating one entry revokes that teammate without disrupting anyone else.
-function loadAuthTokens(): Map<string, string> {
-  const raw = process.env.MCP_AUTH_TOKENS;
-  if (!raw) {
-    console.error("Error: MCP_AUTH_TOKENS is required in HTTP mode. Set it to a JSON object mapping token → user label, e.g. {\"tok_abc\":\"alice\"}");
-    process.exit(1);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    console.error("Error: MCP_AUTH_TOKENS must be valid JSON (a JSON object mapping token → user label)");
-    process.exit(1);
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    console.error("Error: MCP_AUTH_TOKENS must be a JSON object mapping token → user label");
-    process.exit(1);
-  }
-  const entries = Object.entries(parsed as Record<string, unknown>);
-  if (entries.length === 0) {
-    console.error("Error: MCP_AUTH_TOKENS is empty; add at least one token → user entry");
-    process.exit(1);
-  }
-  for (const [token, user] of entries) {
-    if (!token || typeof user !== "string" || !user) {
-      console.error("Error: MCP_AUTH_TOKENS entries must be non-empty string → non-empty string");
-      process.exit(1);
-    }
-  }
-  return new Map(entries as [string, string][]);
-}
+const REQUIRED_HTTP_ENVS = [
+  "STYTCH_PROJECT_ID",
+  "STYTCH_PROJECT_SECRET",
+  "STYTCH_PROJECT_DOMAIN",
+  "MCP_RESOURCE_URL",
+] as const;
 
-const AUTH_TOKENS = isStdioMode ? new Map<string, string>() : loadAuthTokens();
+if (!isStdioMode) {
+  const missing = REQUIRED_HTTP_ENVS.filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error(`Error: HTTP mode requires ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
 
 // Type definitions
 interface GongCall {
@@ -575,6 +555,18 @@ async function runStdio() {
 }
 
 async function runHttp() {
+  const mcpResourceUrl = process.env.MCP_RESOURCE_URL!;
+  const stytchProjectDomain = process.env.STYTCH_PROJECT_DOMAIN!;
+  const mcpServerBaseUrl = new URL(mcpResourceUrl).origin;
+  const wwwAuthenticate = `Bearer resource_metadata="${resourceMetadataUrl(mcpServerBaseUrl)}"`;
+
+  const authenticate = createAuthenticator({
+    projectId: process.env.STYTCH_PROJECT_ID!,
+    projectSecret: process.env.STYTCH_PROJECT_SECRET!,
+    projectDomain: stytchProjectDomain,
+    staffEmailDomain: process.env.CONFIDO_STAFF_EMAIL_DOMAIN ?? "confidotech.com",
+  });
+
   const app = express();
   app.use(express.json());
 
@@ -582,20 +574,26 @@ async function runHttp() {
     res.type("text/plain").send("ok");
   });
 
+  registerWellKnownRoutes(app, {
+    resourceUrl: mcpResourceUrl,
+    authorizationServerUrl: stytchProjectDomain,
+  });
+
   app.post("/mcp", async (req, res) => {
     const authHeader = req.headers.authorization ?? "";
     const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const user = bearer ? AUTH_TOKENS.get(bearer) : undefined;
-    if (!user) {
+    const result = await authenticate(bearer);
+    if (!result.ok) {
+      res.setHeader("WWW-Authenticate", wwwAuthenticate);
       res.status(401).json({
         jsonrpc: "2.0",
-        error: { code: -32001, message: "Unauthorized" },
+        error: { code: -32001, message: `Unauthorized (${result.reason})` },
         id: null,
       });
       return;
     }
     const method = typeof req.body?.method === "string" ? req.body.method : "?";
-    console.log(`[${user}] ${method}`);
+    console.log(`[${result.user}] ${method}`);
 
     const server = createServer();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
